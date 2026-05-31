@@ -8,7 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initFlutterEmbedder();
+  // NO inicializamos embedder aquí - lo hacemos en el botón para ver errores.
   runApp(const MaterialApp(home: SmokeTestScreen()));
 }
 
@@ -21,23 +21,26 @@ class SmokeTestScreen extends StatefulWidget {
 class _SmokeTestScreenState extends State<SmokeTestScreen> {
   String _log = 'Listo. Presiona el botón para correr el smoke test.';
   bool _running = false;
+  bool _embedderInitialized = false;
 
   Future<String> _copyAssetToFile(String assetPath) async {
     final dir = await getApplicationSupportDirectory();
     final fileName = assetPath.split('/').last;
     final outFile = File('${dir.path}/$fileName');
     if (!await outFile.exists()) {
+      _addLog('   Copiando $fileName (puede tardar ~10s por tamaño)...');
       final bytes = await rootBundle.load(assetPath);
       await outFile.writeAsBytes(
         bytes.buffer.asUint8List(bytes.offsetInBytes, bytes.lengthInBytes),
         flush: true,
       );
+    } else {
+      _addLog('   $fileName ya existe en filesystem');
     }
     return outFile.path;
   }
 
   double _cosineSimilarity(List<double> a, List<double> b) {
-    // Asume vectores normalizados (norma ≈ 1). Si no, dividir entre normas.
     double dot = 0.0;
     for (int i = 0; i < a.length; i++) {
       dot += a[i] * b[i];
@@ -57,16 +60,33 @@ class _SmokeTestScreenState extends State<SmokeTestScreen> {
     });
 
     try {
+      // PASO 0: init del embedder, ahora con timing y error visible
+      if (!_embedderInitialized) {
+        _addLog('0/5 Inicializando flutter_embedder...');
+        final initSw = Stopwatch()..start();
+        await initFlutterEmbedder();
+        initSw.stop();
+        _addLog('   Init: ${initSw.elapsedMilliseconds} ms');
+        _embedderInitialized = true;
+      } else {
+        _addLog('0/5 Embedder ya inicializado, saltando');
+      }
+
       _addLog('1/5 Copiando assets a filesystem...');
+      final copySw = Stopwatch()..start();
       final modelPath = await _copyAssetToFile('assets/models/model.onnx');
       final tokenizerPath = await _copyAssetToFile('assets/models/tokenizer.json');
-      _addLog('   Modelo: $modelPath');
+      copySw.stop();
+      _addLog('   Copy total: ${copySw.elapsedMilliseconds} ms');
 
-      _addLog('2/5 Inicializando MiniLmEmbedder...');
+      _addLog('2/5 Creando MiniLmEmbedder...');
+      final createSw = Stopwatch()..start();
       final embedder = MiniLmEmbedder.create(
         modelPath: modelPath,
         tokenizerPath: tokenizerPath,
       );
+      createSw.stop();
+      _addLog('   Create: ${createSw.elapsedMilliseconds} ms');
 
       _addLog('3/5 Embebiendo "hola mundo"...');
       final sw = Stopwatch()..start();
@@ -74,15 +94,14 @@ class _SmokeTestScreenState extends State<SmokeTestScreen> {
       sw.stop();
       _addLog('   Latencia: ${sw.elapsedMilliseconds} ms');
       _addLog('   Dimensiones: ${embedding.length}');
-      _addLog('   Primeros 5 valores: ${embedding.take(5).toList()}');
+      _addLog('   Primeros 5: ${embedding.take(5).toList()}');
 
-      // Verificar normalización
       double norma = 0;
       for (final v in embedding) {
         norma += v * v;
       }
       norma = math.sqrt(norma);
-      _addLog('   Norma del vector: ${norma.toStringAsFixed(4)}');
+      _addLog('   Norma: ${norma.toStringAsFixed(4)}');
 
       _addLog('4/5 Cargando golden_test.json...');
       final goldenJson = await rootBundle.loadString('assets/data/golden_test.json');
@@ -98,18 +117,17 @@ class _SmokeTestScreenState extends State<SmokeTestScreen> {
       _addLog('   Similarity: ${similarity.toStringAsFixed(6)}');
 
       if (similarity > 0.999) {
-        _addLog('\n✅ PARIDAD OK — Flutter y Colab producen el mismo vector');
+        _addLog('\n✅ PARIDAD OK');
       } else if (similarity > 0.95) {
-        _addLog('\n⚠️  PARIDAD APROXIMADA — diferencias menores (¿cuantización?)');
-        _addLog('   Puede ser usable pero verifica retrieval quality con eval set');
+        _addLog('\n⚠️  PARIDAD APROXIMADA');
       } else {
-        _addLog('\n❌ PARIDAD ROTA — los vectores son inconsistentes');
-        _addLog('   Causas posibles: tokenizer distinto, pooling distinto,');
-        _addLog('   normalización distinta, o modelo distinto entre Colab y Flutter');
+        _addLog('\n❌ PARIDAD ROTA');
       }
     } catch (e, st) {
-      _addLog('\n❌ ERROR: $e');
-      _addLog('Stack:\n$st');
+      _addLog('\n❌ ERROR en step: $e');
+      _addLog('Stack (primeras 10 líneas):');
+      final lines = st.toString().split('\n').take(10).join('\n');
+      _addLog(lines);
     } finally {
       setState(() => _running = false);
     }
