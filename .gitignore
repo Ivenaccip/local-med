@@ -45,4 +45,5 @@ ios/.symlinks/
 # OS
 .DS_Store
 Thumbs.db
-"local_med\assets\models\*.onnx" 
+local_med\assets\models\*.onnx
+**/*.onnx
