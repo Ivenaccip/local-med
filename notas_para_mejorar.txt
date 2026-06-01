@@ -1,0 +1,7 @@
+"Implementar el loop de clarificaci¢n con 1 o 2 preguntas adaptativas" 
+"Pre-filtro por  rea con clasificador tiny" 
+"Whitening del corpus" 
+"Cross-encoder re-rank en el top 3" 
+"Calibraci¢n Platt" 
+"formatQuery y formatDocument para quitar el techo artificial" 
+"Aumentar la data, haciendo data para: adulto, ni¤o, adulto mayor" 
